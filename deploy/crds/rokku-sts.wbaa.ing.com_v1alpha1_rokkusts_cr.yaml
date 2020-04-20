@@ -1,0 +1,8 @@
+apiVersion: rokku-sts.wbaa.ing.com/v1alpha1
+kind: RokkuSts
+metadata:
+  name: rokkusts
+spec:
+  image: wbaa/rokku-sts:0.3.4
+  imagePullPolicy: Always
+  size: 3

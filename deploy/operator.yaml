@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sts-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      name: sts-operator
+  template:
+    metadata:
+      labels:
+        name: sts-operator
+    spec:
+      serviceAccountName: sts-operator
+      containers:
+        - name: sts-operator
+          # Replace this with the built image name
+          image: arempter/sts-operator:latest
+          command:
+          - sts-operator
+          imagePullPolicy: Always
+          env:
+            - name: WATCH_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: OPERATOR_NAME
+              value: "sts-operator"
