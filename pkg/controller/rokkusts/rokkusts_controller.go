@@ -55,7 +55,7 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 
 	// TODO(user): Modify this to be the types you create that are owned by the primary resource
 	// Watch for changes to secondary resource Pods and requeue the owner RokkuSts
-	err = c.Watch(&source.Kind{Type: &corev1.Pod{}}, &handler.EnqueueRequestForOwner{
+	err = c.Watch(&source.Kind{Type: &appsv1.Deployment{}}, &handler.EnqueueRequestForOwner{
 		IsController: true,
 		OwnerType:    &rokkustsv1alpha1.RokkuSts{},
 	})
@@ -134,7 +134,7 @@ func (r *ReconcileRokkuSts) Reconcile(request reconcile.Request) (reconcile.Resu
 	}
 
 	// Update the rokku-sts status with the pod names
-	// List the pods for this memcached's deployment
+	// List the pods for this deployment
 	podList := &corev1.PodList{}
 	listOpts := []client.ListOption{
 		client.InNamespace(instance.Namespace),
@@ -179,8 +179,8 @@ func (r *ReconcileRokkuSts) deploymentForSts(s *rokkustsv1alpha1.RokkuSts) *apps
 				},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{{
-						Image:   "wbaa/rokku-sts:0.3.4",
-						Name:    "rokk-sts",
+						Image: "wbaa/rokku-sts:0.3.4",
+						Name:  "rokku-sts",
 						Ports: []corev1.ContainerPort{{
 							ContainerPort: 12345,
 							Name:          "rokku-sts",
