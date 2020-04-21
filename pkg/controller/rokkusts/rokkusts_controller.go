@@ -198,6 +198,24 @@ func (r *ReconcileRokkuSts) Reconcile(request reconcile.Request) (reconcile.Resu
 		reqLogger.Error(err, "Failed to get keycloak Deployment")
 		return reconcile.Result{}, err
 	}
+	// keycloak service
+	keycloakServiceFound := &corev1.Service{}
+	err = r.client.Get(context.TODO(), types.NamespacedName{Name: "keycloak-service", Namespace: instance.Namespace}, keycloakServiceFound)
+	if err != nil && errors.IsNotFound(err) {
+		// Define a new svc
+		svc := r.KeycloakService(instance)
+		reqLogger.Info("Creating a new keycloak service", "Deployment.Namespace", svc.Namespace, "Deployment.Name", svc.Name)
+		err = r.client.Create(context.TODO(), svc)
+		if err != nil {
+			reqLogger.Error(err, "Failed to create new keycloak service", "Deployment.Namespace", svc.Namespace, "Deployment.Name", svc.Name)
+			return reconcile.Result{}, err
+		}
+		// Deployment created successfully - return and requeue
+		return reconcile.Result{Requeue: true}, nil
+	} else if err != nil {
+		reqLogger.Error(err, "Failed to get keycloak service")
+		return reconcile.Result{}, err
+	}
 
 	// Ensure the deployment size is the same as the spec
 	size := instance.Spec.Size
@@ -347,6 +365,38 @@ func (r *ReconcileRokkuSts) deploymentForKeycloak(s *rokkustsv1alpha1.RokkuSts) 
 	controllerutil.SetControllerReference(s, dep, r.scheme)
 	return dep
 }
+func (r *ReconcileRokkuSts) KeycloakService(s *rokkustsv1alpha1.RokkuSts) *corev1.Service {
+	service := &corev1.Service{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "Service",
+			APIVersion: "v1",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "keycloak-service",
+			Namespace: s.Namespace,
+			OwnerReferences: []metav1.OwnerReference{
+				*metav1.NewControllerRef(s, schema.GroupVersionKind{
+					Group:   v1alpha1.SchemeGroupVersion.Group,
+					Version: v1alpha1.SchemeGroupVersion.Version,
+					Kind:    "RokkuSts",
+				}),
+			},
+			Labels: labelsForKeyclok("keycloak"),
+		},
+		Spec: corev1.ServiceSpec{
+			Ports: []corev1.ServicePort{
+				{
+					Protocol:   corev1.ProtocolTCP,
+					TargetPort: intstr.FromInt(8080),
+					Port:       int32(8080),
+				},
+			},
+
+			Selector: labelsForKeyclok("keycloak"),
+		},
+	}
+	return service
+}
 
 func (r *ReconcileRokkuSts) deploymentForSts(s *rokkustsv1alpha1.RokkuSts) *appsv1.Deployment {
 	ls := labelsForSts(s.Name)
@@ -377,6 +427,18 @@ func (r *ReconcileRokkuSts) deploymentForSts(s *rokkustsv1alpha1.RokkuSts) *apps
 						Env: []corev1.EnvVar{{
 							Name:  "MARIADB_URL",
 							Value: "jdbc:mysql:loadbalance://mariadb-service:3307,mariadb-service:3307/rokku",
+						}, {
+							Name:  "STS_HOST",
+							Value: "0.0.0.0",
+						}, {
+							Name:  "KEYCLOAK_URL",
+							Value: "http://keycloak-service:8080",
+						}, {
+							Name:  "KEYCLOAK_CHECK_REALM_URL",
+							Value: "false",
+						}, {
+							Name:  "KEYCLOAK_CHECK_ISSUER_FOR_LIST",
+							Value: "sts-rokku",
 						}},
 					}},
 				},
