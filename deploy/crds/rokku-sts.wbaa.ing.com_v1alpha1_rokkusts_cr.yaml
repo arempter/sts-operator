@@ -5,4 +5,4 @@ metadata:
 spec:
   image: wbaa/rokku-sts:0.3.4
   imagePullPolicy: Always
-  size: 3
+  size: 1
