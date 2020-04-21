@@ -15,7 +15,7 @@ $ operator-sdk generate crds
 $ kubectl create -f deploy/service_account.yaml 
 $ kubectl create -f deploy/role.yaml 
 $ kubectl create -f deploy/role_binding.yaml 
-$ kubectl create -f deploy/operator.yaml 
 $ kubectl create -f deploy/crds/rokku-sts.wbaa.ing.com_rokkusts_crd.yaml 
+$ kubectl create -f deploy/operator.yaml 
 $ kubectl create -f deploy/crds/rokku-sts.wbaa.ing.com_v1alpha1_rokkusts_cr.yaml
 ```
