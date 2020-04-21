@@ -124,6 +124,25 @@ func (r *ReconcileRokkuSts) Reconcile(request reconcile.Request) (reconcile.Resu
 		return reconcile.Result{}, err
 	}
 
+	// sts service
+	stsServiceFound := &corev1.Service{}
+	err = r.client.Get(context.TODO(), types.NamespacedName{Name: "sts-service", Namespace: instance.Namespace}, stsServiceFound)
+	if err != nil && errors.IsNotFound(err) {
+		// Define a new svc
+		svc := r.StsService(instance)
+		reqLogger.Info("Creating a new rokku-sts service", "Deployment.Namespace", svc.Namespace, "Deployment.Name", svc.Name)
+		err = r.client.Create(context.TODO(), svc)
+		if err != nil {
+			reqLogger.Error(err, "Failed to create new rokku-sts service", "Deployment.Namespace", svc.Namespace, "Deployment.Name", svc.Name)
+			return reconcile.Result{}, err
+		}
+		// Deployment created successfully - return and requeue
+		return reconcile.Result{Requeue: true}, nil
+	} else if err != nil {
+		reqLogger.Error(err, "Failed to get rokku-sts service")
+		return reconcile.Result{}, err
+	}
+
 	// mariadb deploy
 	mariadbFound := &appsv1.Deployment{}
 	err = r.client.Get(context.TODO(), types.NamespacedName{Name: "mariadb", Namespace: instance.Namespace}, mariadbFound)
@@ -143,8 +162,8 @@ func (r *ReconcileRokkuSts) Reconcile(request reconcile.Request) (reconcile.Resu
 		return reconcile.Result{}, err
 	}
 	// mariadb service
-	serviceFound := &corev1.Service{}
-	err = r.client.Get(context.TODO(), types.NamespacedName{Name: "mariadb-service", Namespace: instance.Namespace}, serviceFound)
+	mariadbServiceFound := &corev1.Service{}
+	err = r.client.Get(context.TODO(), types.NamespacedName{Name: "mariadb-service", Namespace: instance.Namespace}, mariadbServiceFound)
 	if err != nil && errors.IsNotFound(err) {
 		// Define a new svc
 		svc := r.MariaDBService(instance)
@@ -240,7 +259,7 @@ func (r *ReconcileRokkuSts) deploymentForMariaDb(s *rokkustsv1alpha1.RokkuSts) *
 						Image: "wbaa/rokku-dev-mariadb:0.0.8",
 						Name:  "mariadb",
 						Ports: []corev1.ContainerPort{{
-							ContainerPort: 3307,
+							ContainerPort: 3306,
 							Name:          "mariadb",
 						}},
 						Env: []corev1.EnvVar{{
@@ -271,16 +290,17 @@ func (r *ReconcileRokkuSts) MariaDBService(s *rokkustsv1alpha1.RokkuSts) *corev1
 					Kind:    "RokkuSts",
 				}),
 			},
+			Labels: labelsForMaria("mariadb"),
 		},
 		Spec: corev1.ServiceSpec{
 			Ports: []corev1.ServicePort{
 				{
-					Name:       "http",
 					Protocol:   corev1.ProtocolTCP,
-					TargetPort: intstr.FromString("http"),
+					TargetPort: intstr.FromInt(3306),
 					Port:       int32(3307),
 				},
 			},
+
 			Selector: labelsForMaria("mariadb"),
 		},
 	}
@@ -367,6 +387,38 @@ func (r *ReconcileRokkuSts) deploymentForSts(s *rokkustsv1alpha1.RokkuSts) *apps
 	controllerutil.SetControllerReference(s, dep, r.scheme)
 	return dep
 
+}
+func (r *ReconcileRokkuSts) StsService(s *rokkustsv1alpha1.RokkuSts) *corev1.Service {
+	service := &corev1.Service{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "Service",
+			APIVersion: "v1",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "sts-service",
+			Namespace: s.Namespace,
+			OwnerReferences: []metav1.OwnerReference{
+				*metav1.NewControllerRef(s, schema.GroupVersionKind{
+					Group:   v1alpha1.SchemeGroupVersion.Group,
+					Version: v1alpha1.SchemeGroupVersion.Version,
+					Kind:    "RokkuSts",
+				}),
+			},
+			Labels: labelsForSts(s.Name),
+		},
+		Spec: corev1.ServiceSpec{
+			Ports: []corev1.ServicePort{
+				{
+					Protocol:   corev1.ProtocolTCP,
+					TargetPort: intstr.FromInt(12345),
+					Port:       int32(12345),
+				},
+			},
+
+			Selector: labelsForSts(s.Name),
+		},
+	}
+	return service
 }
 
 func labelsForSts(name string) map[string]string {
