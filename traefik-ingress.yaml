@@ -1,0 +1,29 @@
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: keycloak-service
+  namespace: default
+spec:
+  rules:
+  - host: keycloak.kube1
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: keycloak-service
+          servicePort: 8080
+---          
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: sts-service
+  namespace: default
+spec:
+  rules:
+  - host: sts.kube1
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: sts-service
+          servicePort: 12345
