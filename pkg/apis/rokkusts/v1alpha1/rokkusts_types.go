@@ -12,7 +12,14 @@ type RokkuStsSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "operator-sdk generate k8s" to regenerate code after modifying this file
 	// Add custom validation using kubebuilder tags: https://book-v1.book.kubebuilder.io/beyond_basics/generating_crd.html
-	Size int32 `json:"size"`
+	Size          int32  `json:"size"`
+	StsImage      string `json:"stsImage"`
+	KeycloakImage string `json:"keycloakImage"`
+	MariaDBImage  string `json:"mariadbImage"`
+	MariaDBUrl    string `json:"mariadbUrl"`
+	KeycloakUrl   string `json:"keycloakUrl"`
+	CheckRealm    bool   `json:"checkRealm"`
+	IssuedFor     string `json:"issuedFor"`
 }
 
 // RokkuStsStatus defines the observed state of RokkuSts
