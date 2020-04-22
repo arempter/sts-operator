@@ -2,20 +2,19 @@ package rokkusts
 
 import (
 	"context"
-	"fmt"
-	rokkustsv1alpha1 "github.com/arempter/sts-operator/pkg/apis/rokkusts/v1alpha1"
-	"github.com/go-logr/logr"
-	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/api/auditregistration/v1alpha1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/utils/pointer"
+	"reflect"
+
+	rokkustsv1alpha1 "github.com/arempter/sts-operator/pkg/apis/rokkusts/v1alpha1"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/intstr"
-	"k8s.io/utils/pointer"
-	"reflect"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -24,7 +23,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
-	"strconv"
 )
 
 var log = logf.Log.WithName("controller_rokkusts")
@@ -68,13 +66,6 @@ func add(mgr manager.Manager, r reconcile.Reconciler) error {
 	if err != nil {
 		return err
 	}
-	err = c.Watch(&source.Kind{Type: &corev1.Service{}}, &handler.EnqueueRequestForOwner{
-		IsController: true,
-		OwnerType:    &rokkustsv1alpha1.RokkuSts{},
-	})
-	if err != nil {
-		return err
-	}
 
 	return nil
 }
@@ -92,12 +83,14 @@ type ReconcileRokkuSts struct {
 
 // Reconcile reads that state of the cluster for a RokkuSts object and makes changes based on the state read
 // and what is in the RokkuSts.Spec
+// TODO(user): Modify this Reconcile function to implement your Controller logic.  This example creates
+// a Pod as an example
 // Note:
 // The Controller will requeue the Request to be processed again if the returned error is non-nil or
 // Result.Requeue is true, otherwise upon completion it will remove the work from the queue.
 func (r *ReconcileRokkuSts) Reconcile(request reconcile.Request) (reconcile.Result, error) {
 	reqLogger := log.WithValues("Request.Namespace", request.Namespace, "Request.Name", request.Name)
-	//reqLogger.Info("Reconciling RokkuSts")
+	reqLogger.Info("Reconciling RokkuSts")
 
 	// Fetch the RokkuSts instance
 	instance := &rokkustsv1alpha1.RokkuSts{}
@@ -113,141 +106,161 @@ func (r *ReconcileRokkuSts) Reconcile(request reconcile.Request) (reconcile.Resu
 		return reconcile.Result{}, err
 	}
 
-	// sts deployment & service
-	r.reconcileDeploymentForSts(context.TODO(), instance, reqLogger)
-	r.reconcileServiceFor(context.TODO(), instance, "rokkusts", 12345, 12345)
+	stsFound := &appsv1.Deployment{}
+	err = r.client.Get(context.TODO(), types.NamespacedName{Name: instance.Name, Namespace: instance.Namespace}, stsFound)
+	if err != nil && errors.IsNotFound(err) {
+		// Define a new deployment
+		dep := r.deploymentForSts(instance)
+		reqLogger.Info("Creating a new RokkuSts Deployment", "Deployment.Namespace", dep.Namespace, "Deployment.Name", dep.Name)
+		err = r.client.Create(context.TODO(), dep)
+		if err != nil {
+			reqLogger.Error(err, "Failed to create new RokkuSts Deployment", "Deployment.Namespace", dep.Namespace, "Deployment.Name", dep.Name)
+			return reconcile.Result{}, err
+		}
+		// Deployment created successfully - return and requeue
+		return reconcile.Result{Requeue: true}, nil
+	} else if err != nil {
+		reqLogger.Error(err, "Failed to get RokkuSts Deployment")
+		return reconcile.Result{}, err
+	}
+
+	// sts service
+	stsServiceFound := &corev1.Service{}
+	err = r.client.Get(context.TODO(), types.NamespacedName{Name: "sts-service", Namespace: instance.Namespace}, stsServiceFound)
+	if err != nil && errors.IsNotFound(err) {
+		// Define a new svc
+		svc := r.StsService(instance)
+		reqLogger.Info("Creating a new rokku-sts service", "Deployment.Namespace", svc.Namespace, "Deployment.Name", svc.Name)
+		err = r.client.Create(context.TODO(), svc)
+		if err != nil {
+			reqLogger.Error(err, "Failed to create new rokku-sts service", "Deployment.Namespace", svc.Namespace, "Deployment.Name", svc.Name)
+			return reconcile.Result{}, err
+		}
+		// Deployment created successfully - return and requeue
+		return reconcile.Result{Requeue: true}, nil
+	} else if err != nil {
+		reqLogger.Error(err, "Failed to get rokku-sts service")
+		return reconcile.Result{}, err
+	}
 
 	// mariadb deploy
-	mariadbEnv := []corev1.EnvVar{{
-		Name:  "MYSQL_ROOT_PASSWORD",
-		Value: "admin",
-	}}
-
-	// mariadb deployment & service
-	r.reconcileDeploymentFor(context.TODO(), instance, "mariadb", instance.Spec.MariaDBImage, 3306, mariadbEnv, reqLogger)
-	r.reconcileServiceFor(context.TODO(), instance, "mariadb", 3307, 3306)
-
-	// keycloak env
-	keycloakEnv := []corev1.EnvVar{{
-		Name:  "KEYCLOAK_USER",
-		Value: "admin",
-	}, {
-		Name:  "KEYCLOAK_PASSWORD",
-		Value: "admin",
-	}}
-
-	// keycloak deployment & service
-	r.reconcileDeploymentFor(context.TODO(), instance, "keycloak", instance.Spec.KeycloakImage, 8080, keycloakEnv, reqLogger)
-	r.reconcileServiceFor(context.TODO(), instance, "keycloak", 8080, 8080)
-
-	return reconcile.Result{}, nil
-}
-
-func (r *ReconcileRokkuSts) reconcileDeploymentForSts(ctx context.Context, s *rokkustsv1alpha1.RokkuSts, logger logr.Logger) error {
-	serviceName := "rokkusts"
-	deploymentName := types.NamespacedName{
-		Name:      serviceName,
-		Namespace: s.Namespace,
-	}
-
-	stsVars := []corev1.EnvVar{{
-		Name:  "MARIADB_URL",
-		Value: s.Spec.MariaDBUrl,
-	}, {
-		Name:  "STS_HOST",
-		Value: "0.0.0.0",
-	}, {
-		Name:  "KEYCLOAK_URL",
-		Value: s.Spec.KeycloakUrl,
-	}, {
-		Name:  "KEYCLOAK_CHECK_REALM_URL",
-		Value: strconv.FormatBool(s.Spec.CheckRealm),
-	}, {
-		Name:  "KEYCLOAK_CHECK_ISSUER_FOR_LIST",
-		Value: s.Spec.IssuedFor,
-	}}
-
-	newDeployment := r.genericDeployment(s, serviceName, s.Spec.StsImage, 12345, stsVars)
-	stsFound := &appsv1.Deployment{}
-
-	err := r.client.Get(ctx, deploymentName, stsFound)
+	mariadbFound := &appsv1.Deployment{}
+	err = r.client.Get(context.TODO(), types.NamespacedName{Name: "mariadb", Namespace: instance.Namespace}, mariadbFound)
 	if err != nil && errors.IsNotFound(err) {
-		logger.Info("Creating a Deployment resource for: " + serviceName)
-
-		return r.client.Create(ctx, newDeployment)
+		// Define a new deployment
+		dep := r.deploymentForMariaDb(instance)
+		reqLogger.Info("Creating a new MariaDb Deployment", "Deployment.Namespace", dep.Namespace, "Deployment.Name", dep.Name)
+		err = r.client.Create(context.TODO(), dep)
+		if err != nil {
+			reqLogger.Error(err, "Failed to create new MariaDb Deployment", "Deployment.Namespace", dep.Namespace, "Deployment.Name", dep.Name)
+			return reconcile.Result{}, err
+		}
+		// Deployment created successfully - return and requeue
+		return reconcile.Result{Requeue: true}, nil
+	} else if err != nil {
+		reqLogger.Error(err, "Failed to get MariaDb Deployment")
+		return reconcile.Result{}, err
+	}
+	// mariadb service
+	mariadbServiceFound := &corev1.Service{}
+	err = r.client.Get(context.TODO(), types.NamespacedName{Name: "mariadb-service", Namespace: instance.Namespace}, mariadbServiceFound)
+	if err != nil && errors.IsNotFound(err) {
+		// Define a new svc
+		svc := r.MariaDBService(instance)
+		reqLogger.Info("Creating a new mariadb service", "Deployment.Namespace", svc.Namespace, "Deployment.Name", svc.Name)
+		err = r.client.Create(context.TODO(), svc)
+		if err != nil {
+			reqLogger.Error(err, "Failed to create new mariadb service", "Deployment.Namespace", svc.Namespace, "Deployment.Name", svc.Name)
+			return reconcile.Result{}, err
+		}
+		// Deployment created successfully - return and requeue
+		return reconcile.Result{Requeue: true}, nil
+	} else if err != nil {
+		reqLogger.Error(err, "Failed to get mariadb service")
+		return reconcile.Result{}, err
 	}
 
-	if err != nil {
-		return fmt.Errorf("failed to retrieve Service resource: %v", err)
+	// keycloak deploy
+	keycloakFound := &appsv1.Deployment{}
+	err = r.client.Get(context.TODO(), types.NamespacedName{Name: "keycloak", Namespace: instance.Namespace}, keycloakFound)
+	if err != nil && errors.IsNotFound(err) {
+		// Define a new deployment
+		dep := r.deploymentForKeycloak(instance)
+		reqLogger.Info("Creating a new keycloak Deployment", "Deployment.Namespace", dep.Namespace, "Deployment.Name", dep.Name)
+		err = r.client.Create(context.TODO(), dep)
+		if err != nil {
+			reqLogger.Error(err, "Failed to create new keycloak Deployment", "Deployment.Namespace", dep.Namespace, "Deployment.Name", dep.Name)
+			return reconcile.Result{}, err
+		}
+		// Deployment created successfully - return and requeue
+		return reconcile.Result{Requeue: true}, nil
+	} else if err != nil {
+		reqLogger.Error(err, "Failed to get keycloak Deployment")
+		return reconcile.Result{}, err
+	}
+	// keycloak service
+	keycloakServiceFound := &corev1.Service{}
+	err = r.client.Get(context.TODO(), types.NamespacedName{Name: "keycloak-service", Namespace: instance.Namespace}, keycloakServiceFound)
+	if err != nil && errors.IsNotFound(err) {
+		// Define a new svc
+		svc := r.KeycloakService(instance)
+		reqLogger.Info("Creating a new keycloak service", "Deployment.Namespace", svc.Namespace, "Deployment.Name", svc.Name)
+		err = r.client.Create(context.TODO(), svc)
+		if err != nil {
+			reqLogger.Error(err, "Failed to create new keycloak service", "Deployment.Namespace", svc.Namespace, "Deployment.Name", svc.Name)
+			return reconcile.Result{}, err
+		}
+		// Deployment created successfully - return and requeue
+		return reconcile.Result{Requeue: true}, nil
+	} else if err != nil {
+		reqLogger.Error(err, "Failed to get keycloak service")
+		return reconcile.Result{}, err
 	}
 
-	size := s.Spec.Size
+	// Ensure the deployment size is the same as the spec
+	size := instance.Spec.Size
 	if *stsFound.Spec.Replicas != size {
 		stsFound.Spec.Replicas = &size
 		err = r.client.Update(context.TODO(), stsFound)
 		if err != nil {
-			logger.Error(err, "Failed to update Deployment", "Deployment.Namespace", stsFound.Namespace, "Deployment.Name", stsFound.Name)
-			return err
+			reqLogger.Error(err, "Failed to update Deployment", "Deployment.Namespace", stsFound.Namespace, "Deployment.Name", stsFound.Name)
+			return reconcile.Result{}, err
 		}
 		// Spec updated - return and requeue
-		return nil
+		return reconcile.Result{Requeue: true}, nil
 	}
 
+	// Update the rokku-sts status with the pod names
+	// List the pods for this deployment
 	podList := &corev1.PodList{}
 	listOpts := []client.ListOption{
-		client.InNamespace(s.Namespace),
-		client.MatchingLabels(labelsFor(s.Name)),
+		client.InNamespace(instance.Namespace),
+		client.MatchingLabels(labelsForSts(instance.Name)),
 	}
 	if err = r.client.List(context.TODO(), podList, listOpts...); err != nil {
-		logger.Error(err, "Failed to list pods", "RokkuSts.Namespace", s.Namespace, "RokkuSts.Name", s.Name)
-		return err
+		reqLogger.Error(err, "Failed to list pods", "RokkuSts.Namespace", instance.Namespace, "RokkuSts.Name", instance.Name)
+		return reconcile.Result{}, err
 	}
 	podNames := getPodNames(podList.Items)
 
 	// Update status.Nodes if needed
-	if !reflect.DeepEqual(podNames, s.Status.Nodes) {
-		s.Status.Nodes = podNames
-		err := r.client.Status().Update(context.TODO(), s)
+	if !reflect.DeepEqual(podNames, instance.Status.Nodes) {
+		instance.Status.Nodes = podNames
+		err := r.client.Status().Update(context.TODO(), instance)
 		if err != nil {
-			logger.Error(err, "Failed to update RokkuSts status")
-			return err
+			reqLogger.Error(err, "Failed to update RokkuSts status")
+			return reconcile.Result{}, err
 		}
 	}
 
-	return r.client.Update(ctx, newDeployment)
+	return reconcile.Result{}, nil
 }
 
-func (r *ReconcileRokkuSts) reconcileDeploymentFor(ctx context.Context, s *rokkustsv1alpha1.RokkuSts, serviceName string,
-	imageName string, port int, envVars []corev1.EnvVar, logger logr.Logger) error {
-	deploymentName := types.NamespacedName{
-		Name:      serviceName,
-		Namespace: s.Namespace,
-	}
-	//logger := log.WithName("reconcileService").WithValues("Deployment", deploymentName)
-
-	newDeployment := r.genericDeployment(s, serviceName, imageName, port, envVars)
-
-	currentDeployment := &appsv1.Deployment{}
-
-	err := r.client.Get(ctx, deploymentName, currentDeployment)
-	if err != nil && errors.IsNotFound(err) {
-		logger.Info("Creating a Deployment resource for: " + serviceName)
-
-		return r.client.Create(ctx, newDeployment)
-	}
-
-	if err != nil {
-		return fmt.Errorf("failed to retrieve Service resource: %v", err)
-	}
-
-	return r.client.Update(ctx, newDeployment)
-}
-
-func (r *ReconcileRokkuSts) genericDeployment(s *rokkustsv1alpha1.RokkuSts, serviceName string, imageName string, port int, envVars []corev1.EnvVar) *appsv1.Deployment {
-	ls := labelsFor(serviceName)
+func (r *ReconcileRokkuSts) deploymentForMariaDb(s *rokkustsv1alpha1.RokkuSts) *appsv1.Deployment {
+	ls := labelsForMaria("mariadb")
 	dep := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      serviceName,
+			Name:      "mariadb",
 			Namespace: s.Namespace,
 		},
 		Spec: appsv1.DeploymentSpec{
@@ -261,13 +274,16 @@ func (r *ReconcileRokkuSts) genericDeployment(s *rokkustsv1alpha1.RokkuSts, serv
 				},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{{
-						Image: imageName,
-						Name:  serviceName,
+						Image: "wbaa/rokku-dev-mariadb:0.0.8",
+						Name:  "mariadb",
 						Ports: []corev1.ContainerPort{{
-							ContainerPort: int32(port),
-							Name:          serviceName,
+							ContainerPort: 3306,
+							Name:          "mariadb",
 						}},
-						Env: envVars,
+						Env: []corev1.EnvVar{{
+							Name:  "MYSQL_ROOT_PASSWORD",
+							Value: "admin",
+						}},
 					}},
 				},
 			},
@@ -276,43 +292,14 @@ func (r *ReconcileRokkuSts) genericDeployment(s *rokkustsv1alpha1.RokkuSts, serv
 	controllerutil.SetControllerReference(s, dep, r.scheme)
 	return dep
 }
-
-func (r *ReconcileRokkuSts) reconcileServiceFor(ctx context.Context, s *rokkustsv1alpha1.RokkuSts, serviceName string, port int, targetPort int) error {
-	svcName := types.NamespacedName{
-		Name:      fmt.Sprintf("%s-service", serviceName),
-		Namespace: s.Namespace,
-	}
-
-	logger := log.WithName("reconcileService").WithValues("Service", svcName)
-
-	newService := r.genericService(s, serviceName, port, targetPort)
-
-	var currentService corev1.Service
-	err := r.client.Get(ctx, svcName, &currentService)
-	if err != nil && errors.IsNotFound(err) {
-		logger.Info("Creating a Service resource for: " + serviceName)
-
-		return r.client.Create(ctx, newService)
-	}
-
-	if err != nil {
-		return fmt.Errorf("failed to retrieve Service resource: %v", err)
-	}
-
-	//logger.Info("Updating Service resource for: "+serviceName)
-
-	return r.client.Update(ctx, newService)
-}
-
-func (r *ReconcileRokkuSts) genericService(s *rokkustsv1alpha1.RokkuSts, serviceName string, port int, targetPort int) *corev1.Service {
-	var fullServiceName = fmt.Sprintf("%s-service", serviceName)
+func (r *ReconcileRokkuSts) MariaDBService(s *rokkustsv1alpha1.RokkuSts) *corev1.Service {
 	service := &corev1.Service{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "Service",
 			APIVersion: "v1",
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      fullServiceName,
+			Name:      "mariadb-service",
 			Namespace: s.Namespace,
 			OwnerReferences: []metav1.OwnerReference{
 				*metav1.NewControllerRef(s, schema.GroupVersionKind{
@@ -321,26 +308,189 @@ func (r *ReconcileRokkuSts) genericService(s *rokkustsv1alpha1.RokkuSts, service
 					Kind:    "RokkuSts",
 				}),
 			},
-			Labels: labelsFor(serviceName),
+			Labels: labelsForMaria("mariadb"),
 		},
 		Spec: corev1.ServiceSpec{
 			Ports: []corev1.ServicePort{
 				{
 					Protocol:   corev1.ProtocolTCP,
-					TargetPort: intstr.FromInt(targetPort),
-					Port:       int32(port),
+					TargetPort: intstr.FromInt(3306),
+					Port:       int32(3307),
 				},
 			},
 
-			Selector: labelsFor(serviceName),
+			Selector: labelsForMaria("mariadb"),
 		},
 	}
-	controllerutil.SetControllerReference(s, service, r.scheme)
 	return service
 }
 
-func labelsFor(name string) map[string]string {
-	return map[string]string{"app": name, name + "_cr": name}
+func (r *ReconcileRokkuSts) deploymentForKeycloak(s *rokkustsv1alpha1.RokkuSts) *appsv1.Deployment {
+	ls := labelsForKeyclok("keycloak")
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "keycloak",
+			Namespace: s.Namespace,
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: pointer.Int32Ptr(1),
+			Selector: &metav1.LabelSelector{
+				MatchLabels: ls,
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: ls,
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Image: "wbaa/rokku-dev-keycloak:0.0.6",
+						Name:  "keycloak",
+						Ports: []corev1.ContainerPort{{
+							ContainerPort: 8080,
+							Name:          "keycloak",
+						}},
+						//todo: add password
+						Env: []corev1.EnvVar{{
+							Name:  "KEYCLOAK_USER",
+							Value: "admin",
+						}, {
+							Name:  "KEYCLOAK_PASSWORD",
+							Value: "admin",
+						}},
+					}},
+				},
+			},
+		},
+	}
+	controllerutil.SetControllerReference(s, dep, r.scheme)
+	return dep
+}
+func (r *ReconcileRokkuSts) KeycloakService(s *rokkustsv1alpha1.RokkuSts) *corev1.Service {
+	service := &corev1.Service{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "Service",
+			APIVersion: "v1",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "keycloak-service",
+			Namespace: s.Namespace,
+			OwnerReferences: []metav1.OwnerReference{
+				*metav1.NewControllerRef(s, schema.GroupVersionKind{
+					Group:   v1alpha1.SchemeGroupVersion.Group,
+					Version: v1alpha1.SchemeGroupVersion.Version,
+					Kind:    "RokkuSts",
+				}),
+			},
+			Labels: labelsForKeyclok("keycloak"),
+		},
+		Spec: corev1.ServiceSpec{
+			Ports: []corev1.ServicePort{
+				{
+					Protocol:   corev1.ProtocolTCP,
+					TargetPort: intstr.FromInt(8080),
+					Port:       int32(8080),
+				},
+			},
+
+			Selector: labelsForKeyclok("keycloak"),
+		},
+	}
+	return service
+}
+
+func (r *ReconcileRokkuSts) deploymentForSts(s *rokkustsv1alpha1.RokkuSts) *appsv1.Deployment {
+	ls := labelsForSts(s.Name)
+	replicas := s.Spec.Size
+
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      s.Name,
+			Namespace: s.Namespace,
+		},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: ls,
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: ls,
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Image: "wbaa/rokku-sts:0.3.4",
+						Name:  "rokku-sts",
+						Ports: []corev1.ContainerPort{{
+							ContainerPort: 12345,
+							Name:          "rokku-sts",
+						}},
+						Env: []corev1.EnvVar{{
+							Name:  "MARIADB_URL",
+							Value: "jdbc:mysql:loadbalance://mariadb-service:3307,mariadb-service:3307/rokku",
+						}, {
+							Name:  "STS_HOST",
+							Value: "0.0.0.0",
+						}, {
+							Name:  "KEYCLOAK_URL",
+							Value: "http://keycloak-service:8080",
+						}, {
+							Name:  "KEYCLOAK_CHECK_REALM_URL",
+							Value: "false",
+						}, {
+							Name:  "KEYCLOAK_CHECK_ISSUER_FOR_LIST",
+							Value: "sts-rokku",
+						}},
+					}},
+				},
+			},
+		},
+	}
+	// Set rokku-sts instance as the owner and controller
+	controllerutil.SetControllerReference(s, dep, r.scheme)
+	return dep
+
+}
+func (r *ReconcileRokkuSts) StsService(s *rokkustsv1alpha1.RokkuSts) *corev1.Service {
+	service := &corev1.Service{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "Service",
+			APIVersion: "v1",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "sts-service",
+			Namespace: s.Namespace,
+			OwnerReferences: []metav1.OwnerReference{
+				*metav1.NewControllerRef(s, schema.GroupVersionKind{
+					Group:   v1alpha1.SchemeGroupVersion.Group,
+					Version: v1alpha1.SchemeGroupVersion.Version,
+					Kind:    "RokkuSts",
+				}),
+			},
+			Labels: labelsForSts(s.Name),
+		},
+		Spec: corev1.ServiceSpec{
+			Ports: []corev1.ServicePort{
+				{
+					Protocol:   corev1.ProtocolTCP,
+					TargetPort: intstr.FromInt(12345),
+					Port:       int32(12345),
+				},
+			},
+
+			Selector: labelsForSts(s.Name),
+		},
+	}
+	return service
+}
+
+func labelsForSts(name string) map[string]string {
+	return map[string]string{"app": "rokkusts", "rokku-sts_cr": name}
+}
+func labelsForMaria(name string) map[string]string {
+	return map[string]string{"app": "mariadb", "mariadb_cr": name}
+}
+func labelsForKeyclok(name string) map[string]string {
+	return map[string]string{"app": "keycloak", "keycloak_cr": name}
 }
 
 func getPodNames(pods []corev1.Pod) []string {

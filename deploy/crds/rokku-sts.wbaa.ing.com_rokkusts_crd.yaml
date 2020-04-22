@@ -31,18 +31,6 @@ spec:
         spec:
           description: RokkuStsSpec defines the desired state of RokkuSts
           properties:
-            checkRealm:
-              type: boolean
-            issuedFor:
-              type: string
-            keycloakImage:
-              type: string
-            keycloakUrl:
-              type: string
-            mariadbImage:
-              type: string
-            mariadbUrl:
-              type: string
             size:
               description: 'INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
                 Important: Run "operator-sdk generate k8s" to regenerate code after
@@ -50,17 +38,8 @@ spec:
                 https://book-v1.book.kubebuilder.io/beyond_basics/generating_crd.html'
               format: int32
               type: integer
-            stsImage:
-              type: string
           required:
-          - checkRealm
-          - issuedFor
-          - keycloakImage
-          - keycloakUrl
-          - mariadbImage
-          - mariadbUrl
           - size
-          - stsImage
           type: object
         status:
           description: RokkuStsStatus defines the observed state of RokkuSts

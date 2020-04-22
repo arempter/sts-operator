@@ -16,7 +16,7 @@ spec:
 apiVersion: extensions/v1beta1
 kind: Ingress
 metadata:
-  name: rokkusts-service
+  name: sts-service
   namespace: default
 spec:
   rules:
@@ -25,5 +25,5 @@ spec:
       paths:
       - path: /
         backend:
-          serviceName: rokkusts-service
+          serviceName: sts-service
           servicePort: 12345
