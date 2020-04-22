@@ -3,13 +3,6 @@ kind: RokkuSts
 metadata:
   name: rokkusts
 spec:
-  stsImage: wbaa/rokku-sts:0.3.4
-  keycloakImage: wbaa/rokku-dev-keycloak:0.0.6
-  mariadbImage: wbaa/rokku-dev-mariadb:0.0.8
-  mariadbUrl: jdbc:mysql:loadbalance://mariadb-service:3307,mariadb-service:3307/rokku
-  keycloakUrl: http://keycloak-service:8080
-  checkRealm: false
-  issuedFor: sts-rokku
+  image: wbaa/rokku-sts:0.3.4
   imagePullPolicy: Always
   size: 1
-
